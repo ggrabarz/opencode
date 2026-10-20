@@ -17,6 +17,7 @@ import {
   ToolFailure,
   HttpContext,
 } from "@opencode/ai"
+import { RequestExecutor } from "@opencode/ai/route"
 import { Permission } from "@opencode/core/permission"
 import { ID } from "@opencode/core/model"
 import { ModelResolver } from "@opencode/core/model-resolver"
@@ -69,6 +70,96 @@ describe("toSessionError", () => {
       ).type,
     ).toBe("provider.no-route")
     expect(toSessionError(llm(new UnknownProviderError({ message: "unknown" }))).type).toBe("provider.unknown")
+  })
+
+  test("separates the free usage limit from paid rate limits, Go quota, and other providers' 429s", () => {
+    const freeBody = JSON.stringify({
+      type: "error",
+      error: { type: "FreeUsageLimitError", message: "Rate limit exceeded. Please try again later." },
+    })
+    const free = RequestExecutor.httpFailure({
+      message: "Rate limit exceeded. Please try again later.",
+      url: "https://opencode.ai/inference/openai/v1/chat/completions",
+      status: 429,
+      responseHeaders: { "retry-after": "3600" },
+      responseBody: freeBody,
+    })
+    expect(SessionRunnerRetry.isRetryable(free)).toBe(false)
+    expect(toSessionError(free)).toEqual({
+      type: "provider.free-limit",
+      message: "Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.",
+      status: 429,
+      response: { body: freeBody },
+      retryAfterMs: 3_600_000,
+    })
+
+    const dateFree = RequestExecutor.httpFailure({
+      message: "Rate limit exceeded. Please try again later.",
+      url: "https://opencode.ai/inference/anthropic/v1/messages",
+      status: 429,
+      responseHeaders: { "retry-after": new Date(Date.now() + 60_000).toUTCString() },
+      responseBody: freeBody,
+    })
+    expect(toSessionError(dateFree).retryAfterMs).toBeGreaterThan(0)
+    expect(
+      toSessionError(llm(new QuotaExceededError({ message: "Rate limit exceeded", body: freeBody, retryAfterMs: 9e15 })))
+        .retryAfterMs,
+    ).toBeUndefined()
+
+    const paidBody = JSON.stringify({
+      error: { type: "server_error", message: "Upstream request failed: Rate limit exceeded. Please try again later." },
+    })
+    const paidRate = RequestExecutor.httpFailure({
+      message: "Upstream request failed: Rate limit exceeded. Please try again later.",
+      url: "https://opencode.ai/inference/openai/v1/chat/completions",
+      status: 429,
+      responseHeaders: { "retry-after": "45" },
+      responseBody: paidBody,
+    })
+    expect(SessionRunnerRetry.isRetryable(paidRate)).toBe(true)
+    expect(toSessionError(paidRate).type).toBe("provider.rate-limit")
+
+    const goBody = JSON.stringify({
+      type: "error",
+      error: { type: "GoUsageLimitError", message: "Subscription quota exceeded." },
+    })
+    const goLimit = RequestExecutor.httpFailure({
+      message: "Subscription quota exceeded.",
+      url: "https://opencode.ai/inference/go/openai/v1/chat/completions",
+      status: 429,
+      responseHeaders: { "retry-after": "120" },
+      responseBody: goBody,
+    })
+    expect(SessionRunnerRetry.isRetryable(goLimit)).toBe(false)
+    expect(toSessionError(goLimit)).toEqual({
+      type: "provider.quota",
+      message: "Subscription quota exceeded.",
+      status: 429,
+      response: { body: goBody },
+    })
+
+    const otherBody = JSON.stringify({ error: { type: "rate_limit_error", message: "Too many requests" } })
+    const otherRate = RequestExecutor.httpFailure({
+      message: "Too many requests",
+      url: "https://api.openai.com/v1/chat/completions",
+      status: 429,
+      responseHeaders: { "retry-after": "10" },
+      responseBody: otherBody,
+    })
+    expect(SessionRunnerRetry.isRetryable(otherRate)).toBe(true)
+    expect(toSessionError(otherRate)).toEqual({
+      type: "provider.rate-limit",
+      message: "Too many requests",
+      status: 429,
+      response: { body: otherBody },
+    })
+
+    const messageOnly = RequestExecutor.httpFailure({
+      message: "Upstream request failed: [FreeUsageLimitError] Rate limit exceeded",
+      url: "https://opencode.ai/inference/openai/v1/chat/completions",
+      status: 429,
+    })
+    expect(toSessionError(messageOnly).type).toBe("provider.quota")
   })
 
   test("preserves the permission rejection type without exposing internal fields", () => {

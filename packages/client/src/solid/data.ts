@@ -1433,6 +1433,9 @@ export function createData(config: CreateDataInput) {
       },
       // Inputs are the pending user and synthetic items; compactions are control items.
       input: {
+        ready(sessionID: string) {
+          return sync.has(`session.pending:${sessionID}`) && !sync.pending(`session.pending:${sessionID}`)
+        },
         list(sessionID: string) {
           return (store.session.pending[sessionID] ?? []).flatMap((item) =>
             item.type === "compaction" ? [] : [item.id],

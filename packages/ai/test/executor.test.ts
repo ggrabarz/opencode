@@ -67,6 +67,33 @@ describe("RequestExecutor", () => {
     }),
   )
 
+  it.effect("normalizes retry-after headers on quota and rate-limit failures", () =>
+    Effect.sync(() => {
+      const body = JSON.stringify({
+        type: "error",
+        error: { code: "insufficient_quota", message: "Quota exceeded." },
+      })
+      const retryFor = (headers?: Record<string, string>) => {
+        const result = RequestExecutor.httpFailure({
+          message: "Quota exceeded.",
+          url: request.url,
+          status: 429,
+          responseHeaders: headers,
+          responseBody: body,
+        })
+        return result.reason._tag === "QuotaExceeded" ? result.reason.retryAfterMs : undefined
+      }
+
+      expect(retryFor({ "retry-after": "3600" })).toBe(3_600_000)
+      expect(retryFor({ "retry-after-ms": "1500" })).toBe(1_500)
+      expect(retryFor({ "retry-after": new Date(Date.now() + 60_000).toUTCString() })).toBeGreaterThan(0)
+      expect(retryFor(undefined)).toBeUndefined()
+      expect(retryFor({ "retry-after": "-10" })).toBe(0)
+      expect(retryFor({ "retry-after": "9000000000000" })).toBeUndefined()
+      expect(retryFor({ "retry-after": "1e308" })).toBeUndefined()
+    }),
+  )
+
   it.effect("retains the original body-read failure on an HTTP status error", () =>
     Effect.gen(function* () {
       const cause = new Error("response body disconnected")

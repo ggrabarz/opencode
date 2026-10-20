@@ -20,18 +20,26 @@ const headerDetails = (headers: Headers.Headers) =>
 const normalizedHeaders = (headers: Headers.Headers) =>
   Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]))
 
+const MAX_RETRY_AFTER_MS = 7 * 86_400_000
+
+const normalizeRetryAfterMs = (value: number) => {
+  if (!Number.isFinite(value)) return undefined
+  const ms = Math.ceil(Math.max(0, value))
+  return ms <= MAX_RETRY_AFTER_MS ? ms : undefined
+}
+
 const retryAfterMs = (headers: Record<string, string>) => {
   const millis = Number(headers["retry-after-ms"])
-  if (Number.isFinite(millis)) return Math.max(0, millis)
+  if (Number.isFinite(millis)) return normalizeRetryAfterMs(millis)
 
   const value = headers["retry-after"]
   if (!value) return undefined
 
   const seconds = Number(value)
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  if (Number.isFinite(seconds)) return normalizeRetryAfterMs(seconds * 1000)
 
   const date = Date.parse(value)
-  if (!Number.isNaN(date)) return Math.max(0, date - Date.now())
+  if (!Number.isNaN(date)) return normalizeRetryAfterMs(date - Date.now())
   return undefined
 }
 

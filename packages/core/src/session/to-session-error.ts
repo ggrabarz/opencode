@@ -1,6 +1,7 @@
-import { AIError, ToolFailure, type FinishReasonDetails } from "@opencode/ai"
+import { AIError, ToolFailure, type FinishReasonDetails, type QuotaExceededError } from "@opencode/ai"
 import { Tool } from "@opencode/schema/tool"
 import { SessionError } from "@opencode/schema/session-error"
+import { Option, Schema } from "effect"
 import { Permission } from "../permission.js"
 import { Integration } from "../integration.js"
 import { AgentNotFoundError, StepFailedError } from "./error.js"
@@ -25,6 +26,31 @@ const tokenSharingMessages = {
     "This ChatGPT connection isn't authorized for this request. Reconnect to ChatGPT or choose another connection.",
 }
 
+// Console inference reports the daily free-model allowance with error.type = "FreeUsageLimitError";
+// clients that know `provider.free-limit` render their own notice and upsell.
+const FREE_USAGE_LIMIT_MESSAGE =
+  "Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models."
+
+const MAX_RETRY_AFTER_MS = 7 * 86_400_000
+
+const FreeUsageLimitBody = Schema.fromJsonString(
+  Schema.Struct({
+    error: Schema.Struct({
+      type: Schema.Literal("FreeUsageLimitError"),
+    }),
+  }),
+)
+
+function isFreeUsageLimit(reason: QuotaExceededError) {
+  return reason.body !== undefined && Option.isSome(Schema.decodeUnknownOption(FreeUsageLimitBody)(reason.body))
+}
+
+function normalizeRetryAfterMs(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return undefined
+  const ms = Math.ceil(Math.max(0, value))
+  return ms <= MAX_RETRY_AFTER_MS ? ms : undefined
+}
+
 export function toSessionError(cause: unknown): SessionError.Error {
   if (cause instanceof AIError) {
     switch (cause.reason._tag) {
@@ -33,6 +59,14 @@ export function toSessionError(cause: unknown): SessionError.Error {
       case "Authentication":
         return providerError("provider.auth", cause.reason)
       case "QuotaExceeded":
+        if (isFreeUsageLimit(cause.reason)) {
+          const retryAfterMs = normalizeRetryAfterMs(cause.reason.retryAfterMs)
+          return {
+            ...providerError("provider.free-limit", cause.reason),
+            message: FREE_USAGE_LIMIT_MESSAGE,
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          }
+        }
         return providerError("provider.quota", cause.reason)
       case "ContentPolicy":
         return providerError("provider.content-filter", cause.reason)

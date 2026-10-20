@@ -62,6 +62,8 @@ const FileTreeNodeV2 = (
       active?: string
       draggable: boolean
       kinds?: ReadonlyMap<string, ChangeKind>
+      /** The entries a folder listed as one entry has, once listed. */
+      count?: number
       as?: "div" | "button"
     },
 ) => {
@@ -71,6 +73,7 @@ const FileTreeNodeV2 = (
     "active",
     "draggable",
     "kinds",
+    "count",
     "as",
     "children",
     "class",
@@ -109,6 +112,8 @@ const FileTreeNodeV2 = (
       {(() => {
         const value = kind()
 
+        if (local.count) return <span class="text-12-regular text-text-weak">{local.count}</span>
+
         if (!value || local.node.type !== "file") return <span data-slot="file-tree-v2-end" />
 
         return (
@@ -146,7 +151,13 @@ export default function FileTreeV2(props: {
   const draggable = () => props.draggable ?? true
   const active = () => normalizeFileTreeV2Path(props.active ?? "")
   const model = createMemo(() => (live() ? undefined : buildFileTreeV2Model(props.allowed ?? [])))
-  const expanded = (path: string) => file.tree.state(path)?.expanded ?? !live()
+
+  // Folders allowed as one entry stay closed until opened; their owner lists their entries then.
+  const folders = createMemo(
+    () => new Set((props.allowed ?? []).filter((path) => path.endsWith("/")).map(normalizeFileTreeV2Path)),
+  )
+
+  const expanded = (path: string) => file.tree.state(path)?.expanded ?? (!live() && !folders().has(path))
 
   const rows = createMemo(() => {
     if (live()) return flattenLiveFileTreeV2((path) => file.tree.list(path), expanded)
@@ -348,6 +359,9 @@ export default function FileTreeV2(props: {
                         class="relative"
                         onFocus={() => setFocused(row().node.path)}
                         onBlur={() => setFocused(undefined)}
+                        count={
+                          folders().has(row().node.path) ? model()?.children.get(row().node.path)?.length : undefined
+                        }
                         aria-expanded={expanded(row().node.path)}
                         onClick={() => toggleDirectory(row().node.path, row().node.originalPath)}
                       >
@@ -359,6 +373,9 @@ export default function FileTreeV2(props: {
                         >
                           <Icon name="chevron-down" />
                         </div>
+                        <Show when={folders().has(row().node.path)}>
+                          <Icon name="folder" size="small" class="shrink-0 text-icon-weak" />
+                        </Show>
                       </FileTreeNodeV2>
                     </Show>
                   )}

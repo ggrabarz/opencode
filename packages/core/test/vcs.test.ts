@@ -582,10 +582,12 @@ describe("Vcs", () => {
           await initGit(directory, "-b", "main")
           await fs.writeFile(path.join(directory, "keep.txt"), "one\n")
           await fs.writeFile(path.join(directory, ".gitignore"), "*.log\n")
+          // A tracked folder lists its untracked files one by one.
+          await fs.mkdir(path.join(directory, "evals/nested"), { recursive: true })
+          await fs.writeFile(path.join(directory, "evals/nested/.keep"), "")
           await commitAll(directory, "initial")
           await fs.writeFile(path.join(directory, "staged.txt"), "staged\n")
           await $`git add staged.txt`.cwd(directory).quiet()
-          await fs.mkdir(path.join(directory, "evals/nested"), { recursive: true })
           await Promise.all(
             Array.from({ length: count }, (_, index) =>
               fs.writeFile(path.join(directory, `evals/nested/file-${index}.md`), `line ${index}\nmore\n`),
@@ -630,6 +632,56 @@ describe("Vcs", () => {
         expect(status.find((row) => row.file === "evals/nested/file-7.md")).toMatchObject({ additions: 2 })
         expect(yield* Effect.promise(() => fs.readFile(path.join(directory, ".git/index")))).toEqual(index)
       }).pipe(provide(directory, { git: true, worktree: directory })),
+    ),
+  )
+
+  it.live("lists an untracked folder as one entry and its files from inside it", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await initGit(directory, "-b", "main")
+          await fs.writeFile(path.join(directory, "keep.txt"), "one\n")
+          await fs.writeFile(path.join(directory, ".gitignore"), "artifacts/\n")
+          await commitAll(directory, "initial")
+          await fs.writeFile(path.join(directory, "keep.txt"), "two\n")
+          await fs.mkdir(path.join(directory, "artifacts"))
+          await fs.mkdir(path.join(directory, "research/deep"), { recursive: true })
+          await fs.writeFile(path.join(directory, "research/deep/inner.md"), "inner\n")
+          await Promise.all(
+            Array.from({ length: 50 }, (_, index) =>
+              Promise.all([
+                fs.writeFile(path.join(directory, `artifacts/${index}.txt`), "ignored\n"),
+                fs.writeFile(path.join(directory, `research/${index}.md`), `line ${index}\n`),
+              ]),
+            ),
+          )
+        })
+        const review = (scope: string) =>
+          Effect.gen(function* () {
+            const vcs = yield* Vcs.Service
+            const context = host()
+            yield* VcsGitPlugin.Plugin.effect({
+              ...context,
+              vcs: { ...context.vcs, transform: vcs.transform, reload: vcs.reload },
+            })
+            return { diff: yield* vcs.diff("working"), status: yield* vcs.status() }
+          }).pipe(provide(path.join(directory, scope), { git: true, worktree: directory }))
+
+        const root = yield* review(".")
+        expect(root.diff.map((row) => row.file)).toEqual(["keep.txt", "research/"])
+        expect(root.status.map((row) => row.file)).toEqual(["keep.txt", "research/"])
+        expect(root.diff[1]).toMatchObject({ status: "added", additions: 0, deletions: 0 })
+
+        const folder = yield* review("research")
+        expect(folder.diff).toHaveLength(51)
+        expect(folder.diff.find((row) => row.file === "research/7.md")).toMatchObject({
+          status: "added",
+          additions: 1,
+        })
+        expect(folder.diff.find((row) => row.file === "research/7.md")?.patch).toContain("+line 7")
+        expect(folder.diff.filter((row) => row.file.endsWith("/")).map((row) => row.file)).toEqual(["research/deep/"])
+        expect((yield* review("research/deep")).diff.map((row) => row.file)).toEqual(["research/deep/inner.md"])
+      }),
     ),
   )
 

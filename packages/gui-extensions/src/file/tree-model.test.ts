@@ -20,11 +20,20 @@ describe("buildFileTreeV2Model", () => {
   })
 
   test("normalizes duplicate and messy paths", () => {
-    const model = buildFileTreeV2Model(["src\\lib\\a.ts", "src/lib/a.ts", "/src//lib/b.ts/"])
+    const model = buildFileTreeV2Model(["src\\lib\\a.ts", "src/lib/a.ts", "/src//lib/b.ts"])
     const rows = flattenFileTreeV2(model, () => true)
 
     expect(rows.map((row) => row.node.path)).toEqual(["src", "src/lib", "src/lib/a.ts", "src/lib/b.ts"])
     expect(rows.find((row) => row.node.path === "src/lib/a.ts")?.node.originalPath).toBe("src\\lib\\a.ts")
+  })
+
+  test("keeps a folder listed as one entry as a directory", () => {
+    const rows = flattenFileTreeV2(buildFileTreeV2Model(["research/", "keep.txt"]), () => true)
+
+    expect(rows.map((row) => [row.node.path, row.node.type])).toEqual([
+      ["research", "directory"],
+      ["keep.txt", "file"],
+    ])
   })
 })
 

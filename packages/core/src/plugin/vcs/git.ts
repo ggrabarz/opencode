@@ -83,7 +83,7 @@ function make(proc: AppProcess.Interface, input: { directory: string; worktree: 
       const git = ctx.git
       const ref = (yield* git.hasHead(ctx.directory)) ? "HEAD" : undefined
       const [list, stats] = yield* Effect.all(
-        [git.status(ctx.directory), ref ? git.stats(ctx.directory, ref) : Effect.succeed([] as Stat[])],
+        [statusItems(ctx), ref ? git.stats(ctx.directory, ref) : Effect.succeed([] as Stat[])],
         { concurrency: 2 },
       )
       const map = nums(stats)
@@ -363,9 +363,11 @@ function makeGit(proc: AppProcess.Interface, env?: Record<string, string>) {
     return result.text().trim() || undefined
   })
 
-  const status = Effect.fn("VcsGit.statusNames")(function* (cwd: string) {
+  const status = Effect.fn("VcsGit.statusNames")(function* (cwd: string, untracked: "normal" | "all" = "normal") {
     return nuls(
-      yield* text(["status", "--porcelain=v1", "--untracked-files=all", "--no-renames", "-z", "--", "."], { cwd }),
+      yield* text(["status", "--porcelain=v1", `--untracked-files=${untracked}`, "--no-renames", "-z", "--", "."], {
+        cwd,
+      }),
     ).flatMap((item) => {
       const file = item.slice(3)
       if (!file) return []
@@ -439,6 +441,8 @@ function makeGit(proc: AppProcess.Interface, env?: Record<string, string>) {
     file: string,
     options?: PatchOptions,
   ) {
+    // A folder entry has no patch of its own.
+    if (file.endsWith("/")) return { text: "", truncated: false } satisfies Patch
     const result = yield* run(
       [
         "diff",
@@ -457,6 +461,7 @@ function makeGit(proc: AppProcess.Interface, env?: Record<string, string>) {
   })
 
   const statUntracked = Effect.fn("VcsGit.statUntracked")(function* (cwd: string, file: string) {
+    if (file.endsWith("/")) return
     const result = yield* run(["diff", "--no-index", "--numstat", "--", "/dev/null", file], {
       cwd,
       maxOutputBytes: 4096,
@@ -602,6 +607,28 @@ const untrackedBatch = Effect.fnUntraced(function* (
   )
 })
 
+/**
+ * Git lists an untracked folder as one `dir/` entry, as `git status` shows it. A directory inside such a folder lists
+ * its own entries instead, with deeper untracked folders again as one entry each.
+ */
+const statusItems = Effect.fnUntraced(function* (ctx: Ctx) {
+  const list = yield* ctx.git.status(ctx.directory)
+  const prefix = path.relative(ctx.worktree, ctx.directory).split(path.sep).join("/")
+  if (
+    !prefix ||
+    !list.some((item) => item.code === "??" && item.file.endsWith("/") && `${prefix}/`.startsWith(item.file))
+  )
+    return list
+
+  const entries = new Map<string, Item>()
+  for (const item of yield* ctx.git.status(ctx.directory, "all")) {
+    const rest = item.file.slice(prefix.length + 1)
+    const file = rest.includes("/") ? `${prefix}/${rest.slice(0, rest.indexOf("/") + 1)}` : item.file
+    if (!entries.has(file)) entries.set(file, { ...item, file })
+  }
+  return [...entries.values()]
+})
+
 const nums = (list: Stat[]) =>
   new Map(list.map((item) => [item.file, { additions: item.additions, deletions: item.deletions }] as const))
 
@@ -729,7 +756,7 @@ const diffAgainstRef = Effect.fnUntraced(function* (ctx: Ctx, ref: string, optio
     [
       ctx.git.diff(ctx.directory, ref, options?.target),
       ctx.git.stats(ctx.directory, ref, options?.target),
-      options?.target ? Effect.succeed([]) : ctx.git.status(ctx.directory),
+      options?.target ? Effect.succeed([]) : statusItems(ctx),
     ],
     { concurrency: 3 },
   )
@@ -747,6 +774,6 @@ const diffAgainstRef = Effect.fnUntraced(function* (ctx: Ctx, ref: string, optio
 })
 
 const track = Effect.fnUntraced(function* (ctx: Ctx, ref: string | undefined, options?: DiffOptions) {
-  if (!ref) return yield* files(ctx, ref, yield* ctx.git.status(ctx.directory), new Map(), emptyBatch(), options)
+  if (!ref) return yield* files(ctx, ref, yield* statusItems(ctx), new Map(), emptyBatch(), options)
   return yield* diffAgainstRef(ctx, ref, options)
 })

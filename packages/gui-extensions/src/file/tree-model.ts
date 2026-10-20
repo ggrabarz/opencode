@@ -32,13 +32,15 @@ export function buildFileTreeV2Model(paths: readonly string[]): FileTreeV2Model 
       const path = parts.slice(0, index + 1).join("/")
 
       if (nodes.has(path)) return
+      // A trailing slash marks a folder listed as one entry, such as an untracked folder.
+      const leaf = index === parts.length - 1 && !value.endsWith("/")
       nodes.set(path, {
         name,
         path,
         absolute: path,
-        type: index === parts.length - 1 ? "file" : "directory",
+        type: leaf ? "file" : "directory",
         ignored: false,
-        originalPath: index === parts.length - 1 ? value : path,
+        originalPath: leaf ? value : path,
       })
     })
   })

@@ -25,6 +25,7 @@ import type Review from "./index"
 import {
   applyFileListKeyDown,
   filterReviewFiles,
+  isReviewFolder,
   reviewDiffKinds,
   reviewDiffNeedsLoad,
   sortReviewPaths,
@@ -124,15 +125,24 @@ function ReviewPanel(props: ReviewPanelProps) {
 
   const diffs = () => props.diffs
 
-  const filteredFiles = createMemo(() =>
-    filterReviewFiles(
-      diffs().map((diff) => diff.file),
+  const searching = createMemo(() => props.state.filter().trim().length > 0)
+
+  // A folder row opens in the change tree; searches and the preview list files only.
+  const filteredFiles = createMemo(() => {
+    const files = diffs().map((diff) => diff.file)
+
+    if (!searching()) return files
+
+    return filterReviewFiles(
+      files.filter((file) => !isReviewFolder(file)),
       props.state.filter(),
-    ),
+    )
+  })
+
+  const navigationFiles = createMemo(() =>
+    searching() ? filteredFiles() : sortReviewPaths(filteredFiles().filter((file) => !isReviewFolder(file))),
   )
 
-  const searching = createMemo(() => props.state.filter().trim().length > 0)
-  const navigationFiles = createMemo(() => (searching() ? filteredFiles() : sortReviewPaths(filteredFiles())))
   const kinds = () => props.kinds
   // Changes-only trees omit "M" — every row is already a change; A/D stay visible.
   const treeKinds = createMemo(() => new Map([...kinds()].filter(([, kind]) => kind !== "mix")))

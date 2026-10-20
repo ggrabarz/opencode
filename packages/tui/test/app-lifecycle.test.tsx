@@ -2229,6 +2229,7 @@ test("free usage limit modal manages live animation FPS and adapts to 44x24 and 
   await anim.waitForFrame((frame) => frame.includes("Refactor the parser"))
   const initialTargetFps = anim.renderer.targetFps
   const initialMaxFps = anim.renderer.maxFps
+  const initialLive = anim.renderer.liveRequestCount
   anim.events.emit({
     id: "evt_free_limit_anim_1",
     created: 3,
@@ -2254,6 +2255,7 @@ test("free usage limit modal manages live animation FPS and adapts to 44x24 and 
   expect(art!.isDestroyed).toBe(true)
   expect(art!.live).toBe(false)
   expect(findArt(anim.renderer.root)).toBeUndefined()
+  expect(anim.renderer.liveRequestCount).toBe(initialLive)
   expect(anim.renderer.targetFps).toBe(initialTargetFps)
   expect(anim.renderer.maxFps).toBe(initialMaxFps)
 

@@ -43,6 +43,8 @@ export interface Resolved {
   // This checkout's main directory; the stored project canonical may be another clone.
   readonly canonical: AbsolutePath
   readonly vcs?: Vcs
+  /** Repository name from the git origin remote. */
+  readonly name?: string
 }
 
 // Keep this filesystem-only; permission checks use it and should not execute VCS commands.
@@ -59,6 +61,35 @@ export const root = Effect.fn("Project.root")(function* (
 
 const ACTIVATE_INTERVAL = 60_000
 const SWEEP_INTERVAL = Duration.hours(1)
+
+/** Last path segment of a git remote, such as `team-board` for `git@github.com:kitlangton/team-board.git`. */
+export function repositoryName(origin: string) {
+  return remoteKey(origin)?.split("/").at(-1)
+}
+
+// Normalizes a git remote to `host/path` so SSH and HTTPS clones of one repository share an identity.
+function remoteKey(input: string) {
+  const value = input.trim()
+  if (!value) return undefined
+
+  const parsed = URL.parse(value)
+  if (parsed) {
+    if (parsed.protocol === "file:") return undefined
+    return remoteParts(parsed.hostname, parsed.pathname)
+  }
+  const scp = value.match(/^([^@/:]+@)?([^/:]+):(.+)$/)
+  if (scp) return remoteParts(scp[2], scp[3])
+  return undefined
+}
+
+function remoteParts(host: string, name: string) {
+  const pathname = name
+    .replace(/^\/+/, "")
+    .replace(/\.git\/?$/, "")
+    .replace(/\/+$/, "")
+  if (!host || !pathname) return undefined
+  return `${host.toLowerCase()}/${pathname}`
+}
 
 export interface ListInput {
   /** Includes archived Projects when true. */
@@ -116,7 +147,7 @@ const layer = Layer.effect(
     const announcing = new Set<string>()
     const persist = Effect.fnUntraced(function* (project: Resolved) {
       const previous = yield* db
-        .select({ canonical: ProjectTable.worktree })
+        .select({ canonical: ProjectTable.worktree, name: ProjectTable.name })
         .from(ProjectTable)
         .where(eq(ProjectTable.id, project.id))
         .get()
@@ -129,6 +160,16 @@ const layer = Layer.effect(
         .returning()
         .get()
         .pipe(Effect.orDie)
+      const named =
+        previous && !previous.name && project.name
+          ? yield* db
+              .update(ProjectTable)
+              .set({ name: project.name, time_updated: sql`${ProjectTable.time_updated}` })
+              .where(and(eq(ProjectTable.id, project.id), isNull(ProjectTable.name)))
+              .returning()
+              .get()
+              .pipe(Effect.orDie)
+          : undefined
       // Clones share a project ID; only replace a canonical directory that is gone.
       const replaced =
         previous &&
@@ -142,7 +183,7 @@ const layer = Layer.effect(
               .get()
               .pipe(Effect.orDie)
           : undefined
-      const changed = replaced ?? unarchived
+      const changed = replaced ?? named ?? unarchived
       if (changed) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(changed))
       if (!project.vcs) return project
       const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: string }> = [
@@ -279,35 +320,9 @@ const layer = Layer.effect(
       )
     })
 
-    const remote = Effect.fnUntraced(function* (repo: Git.Repository) {
-      const origin = yield* git.remote.get(repo)
-      if (!origin) return undefined
-      const normalized = url(origin)
-      if (!normalized) return undefined
-      return ID.make(Hash.fast(`git-remote:${normalized}`))
-    })
-
-    function url(input: string) {
-      const value = input.trim()
-      if (!value) return undefined
-
-      const parsed = URL.parse(value)
-      if (parsed) {
-        if (parsed.protocol === "file:") return undefined
-        return parts(parsed.hostname, parsed.pathname)
-      }
-      const scp = value.match(/^([^@/:]+@)?([^/:]+):(.+)$/)
-      if (scp) return parts(scp[2], scp[3])
-      return undefined
-    }
-
-    function parts(host: string, name: string) {
-      const pathname = name
-        .replace(/^\/+/, "")
-        .replace(/\.git\/?$/, "")
-        .replace(/\/+$/, "")
-      if (!host || !pathname) return undefined
-      return `${host.toLowerCase()}/${pathname}`
+    function remote(origin: string | undefined) {
+      const key = origin ? remoteKey(origin) : undefined
+      return key ? ID.make(Hash.fast(`git-remote:${key}`)) : undefined
     }
 
     const rootCommit = Effect.fnUntraced(function* (repo: Git.Repository) {
@@ -363,7 +378,8 @@ const layer = Layer.effect(
           : undefined
       if (repo) {
         const previous = yield* cached(repo.commonDirectory)
-        const id = (yield* remote(repo)) ?? previous ?? (yield* rootCommit(repo))
+        const origin = yield* git.remote.get(repo)
+        const id = remote(origin) ?? previous ?? (yield* rootCommit(repo))
         const canonical =
           repo.gitDirectory === repo.commonDirectory
             ? repo.worktree
@@ -377,6 +393,7 @@ const layer = Layer.effect(
           directory: repo.worktree,
           canonical,
           vcs: { type: "git" as const, store: repo.commonDirectory },
+          name: origin ? repositoryName(origin) : undefined,
         })
       }
 

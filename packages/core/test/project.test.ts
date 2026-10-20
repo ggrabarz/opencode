@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
@@ -535,6 +535,7 @@ describe("Project.resolve", () => {
       expect(result.id).not.toBe(Project.ID.make(yield* Effect.promise(() => rootCommit(tmp.path))))
       expect(result.directory).toBe(yield* real(tmp.path))
       expect(result.vcs?.type).toBe("git")
+      expect((yield* project.list()).find((item) => item.id === result.id)?.name).toBe("App")
     }),
   )
 
@@ -747,4 +748,15 @@ describe("Project.resolve", () => {
       })
     }),
   )
+})
+
+describe("Project.repositoryName", () => {
+  test("uses the last remote path segment without .git", () => {
+    expect(Project.repositoryName("git@github.com:kitlangton/team-board.git")).toBe("team-board")
+    expect(Project.repositoryName("https://github.com/anomalyco/hex.git")).toBe("hex")
+    expect(Project.repositoryName("https://github.com/anomalyco/hex")).toBe("hex")
+    expect(Project.repositoryName("ssh://git@gitlab.com/group/subgroup/tool.git/")).toBe("tool")
+    expect(Project.repositoryName("file:///tmp/repo.git")).toBeUndefined()
+    expect(Project.repositoryName("")).toBeUndefined()
+  })
 })

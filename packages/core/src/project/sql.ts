@@ -48,12 +48,17 @@ export const ProjectDirectoryTable = sqliteTable(
 
 export function upsertProject(
   db: DatabaseClient | Transaction,
-  project: { readonly id: ProjectSchema.ID; readonly canonical: AbsolutePath; readonly vcs?: ProjectSchema.Vcs },
+  project: {
+    readonly id: ProjectSchema.ID
+    readonly canonical: AbsolutePath
+    readonly vcs?: ProjectSchema.Vcs
+    readonly name?: string
+  },
 ) {
   const vcs = project.vcs?.type
   return db
     .insert(ProjectTable)
-    .values({ id: project.id, worktree: project.canonical, vcs, sandboxes: [] })
+    .values({ id: project.id, worktree: project.canonical, vcs, name: project.name, sandboxes: [] })
     .onConflictDoUpdate({
       target: ProjectTable.id,
       set: { vcs: vcs ?? null },

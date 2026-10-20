@@ -11,7 +11,7 @@ import { Database } from "@opencode/core/database/database"
 import { Project } from "@opencode/core/project"
 import { ProjectIcon } from "@opencode/core/project/icon"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode/core/schema"
 import { FSUtil } from "@opencode/util/fs-util"
 import { initGit } from "./fixture/git"
 import { tmpdir } from "./fixture/tmpdir"
@@ -123,6 +123,9 @@ describe("Project icon persistence", () => {
         name: "team-board",
         icon: { url: expectedUrl },
       })
+      expect(yield* project.icons(AbsolutePath.make(tmp.path))).toEqual([
+        { path: RelativePath.make("public/favicon.svg"), url: expectedUrl },
+      ])
 
       const overridden = yield* project.update({
         projectID: resolved.id,

@@ -54,7 +54,7 @@ test("exposes every standard HTTP API group", () => {
   expect(Object.keys(client.experimental)).toEqual(["persistentPty"])
   expect(client.experimental.persistentPty.read).toBeFunction()
   expect(Object.keys(client.shell)).toEqual(["list", "create", "get", "output", "remove"])
-  expect(Object.keys(client.project)).toEqual(["list", "update"])
+  expect(Object.keys(client.project)).toEqual(["list", "icons", "update"])
   expect(Object.keys(client.worktree)).toEqual(["list", "create", "remove", "refresh"])
 })
 
@@ -216,6 +216,22 @@ test("client errors keep the reason and describe the failure in the message", as
       message: "UnsupportedContentType: text/html",
     },
   )
+})
+
+test("project.icons uses the location-scoped project contract", async () => {
+  let request: Request | undefined
+  const icons = [{ path: "public/favicon.svg", url: "data:image/svg+xml;base64,PHN2ZyAvPg==" }]
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      request = input instanceof Request ? input : new Request(input, init)
+      return Response.json(icons)
+    },
+  })
+
+  expect(await client.project.icons({ location: { directory: "/tmp/project" } })).toEqual(icons)
+  expect(request?.method).toBe("GET")
+  expect(request?.url).toBe("http://localhost:3000/api/project/icons?location%5Bdirectory%5D=%2Ftmp%2Fproject")
 })
 
 test("project.update uses the global project contract", async () => {

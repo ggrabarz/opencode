@@ -1,5 +1,6 @@
 import { getFilename } from "@opencode/util/path"
 import type { ProjectUpdateInput } from "@opencode/client/promise"
+import { useQuery } from "@tanstack/solid-query"
 import { createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useGlobal } from "@/runtime/server/runtime"
@@ -14,6 +15,13 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
   const language = useLanguage()
   const global = useGlobal()
   const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
+
+  const icons = useQuery(() => ({
+    queryKey: [serverCtx().sdk.scope, props.project.worktree, "project-icons"] as const,
+    queryFn: ({ signal }) =>
+      serverCtx().sdk.api.project.icons({ location: { directory: props.project.worktree } }, { signal }),
+  }))
+
   const folderName = createMemo(() => getFilename(props.project.worktree))
   const defaultName = createMemo(() => props.project.name || folderName())
 
@@ -51,7 +59,7 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
         serverCtx().sync.project.meta(props.project.worktree, patch)
       })
       .then(complete)
-      .catch((error: unknown) => {
+      .catch((error) => {
         showToast({
           variant: "error",
           title: language.t("common.requestFailed"),
@@ -91,10 +99,10 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
   function selectFile(file: File) {
     if (!file.type.startsWith("image/")) return
     const reader = new FileReader()
-    reader.onload = (event) => {
-      const result = event.target?.result
+    reader.onload = () => {
+      const result = reader.result
 
-      if (typeof result !== "string") return
+      if (!result || result instanceof ArrayBuffer) return
       setStore("iconOverride", result)
       setStore("iconHover", false)
       saveIcon(store.color, result)
@@ -108,8 +116,13 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
     setStore,
     folderName,
     defaultName,
+    icons,
     saveName,
     saveStartup,
+    selectIcon(url: string) {
+      setStore("iconOverride", url)
+      saveIcon(store.color, url)
+    },
     setColor(value: string | undefined) {
       setStore("color", value)
       saveIcon(value, store.iconOverride)

@@ -406,6 +406,8 @@ export type SessionMessageCompactionRunning = {
   recent: string
 }
 
+export type ProjectIconCandidate = { path: RelativePath; url: string }
+
 export type FileSystemEntry = { path: RelativePath; type: "file" | "directory" }
 
 export type SessionRevert = {
@@ -6261,6 +6263,12 @@ export type CredentialRemoveOutput = void
 export type ProjectListInput = { readonly archived?: { readonly archived?: boolean | undefined }["archived"] }
 
 export type ProjectListOutput = Array<Project>
+
+export type ProjectIconsInput = {
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
+}
+
+export type ProjectIconsOutput = Array<ProjectIconCandidate>
 
 export type ProjectUpdateInput = {
   readonly projectID: { readonly projectID: string }["projectID"]

@@ -4,7 +4,7 @@ import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
 import { ChildProcess } from "effect/process"
 import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm"
 import path from "path"
-import { AbsolutePath } from "./schema.js"
+import { AbsolutePath, RelativePath } from "./schema.js"
 import { Bus } from "./bus.js"
 import { Database } from "./database/database.js"
 import { Worktree } from "@opencode/schema/worktree"
@@ -29,6 +29,9 @@ export type Current = ProjectSchema.Current
 
 export const Info = ProjectSchema.Info
 export interface Info extends Schema.Schema.Type<typeof Info> {}
+
+export const IconCandidate = ProjectSchema.IconCandidate
+export type IconCandidate = ProjectSchema.IconCandidate
 
 export const UpdateInput = ProjectSchema.UpdateInput
 export type UpdateInput = ProjectSchema.UpdateInput
@@ -99,6 +102,7 @@ export interface ListInput {
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Info>>
+  readonly icons: (directory: AbsolutePath) => Effect.Effect<ReadonlyArray<IconCandidate>>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
   /** Records Project activity for recency ordering, at most once per minute per Project. */
   readonly activate: (projectID: ID) => Effect.Effect<void>
@@ -284,6 +288,11 @@ const layer = Layer.effect(
         .all()
         .pipe(Effect.orDie)
       return rows.map(fromRow)
+    })
+
+    const icons = Effect.fn("Project.icons")(function* (directory: AbsolutePath) {
+      const candidates = yield* ProjectIcon.discover(fs, directory)
+      return candidates.map((item) => ({ path: RelativePath.make(item.path ?? "opencode.json"), url: item.url }))
     })
 
     const update = Effect.fn("Project.update")(function* (input: UpdateInput) {
@@ -518,7 +527,7 @@ const layer = Layer.effect(
       )
     })
 
-    return Service.of({ list, update, activate, resolve, sweep })
+    return Service.of({ list, icons, update, activate, resolve, sweep })
   }),
 )
 

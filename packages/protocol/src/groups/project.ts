@@ -2,6 +2,7 @@ import { Project } from "@opencode/schema/project"
 import { Schema, SchemaGetter, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 import { ProjectNotFoundError } from "../errors.js"
+import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 const root = "/api/project"
 const UpdatePayload = Schema.Struct(Struct.omit(Project.UpdateInput.fields, ["projectID"]))
@@ -24,6 +25,20 @@ export const ProjectGroup = HttpApiGroup.make("server.project")
         description: "List known projects. Archived projects are excluded unless archived=true.",
       }),
     ),
+  )
+  .add(
+    HttpApiEndpoint.get("project.icons", `${root}/icons`, {
+      query: LocationQuery,
+      success: Schema.Array(Project.IconCandidate),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "project.icons",
+          summary: "List project icons",
+          description: "Discover icon candidates in the requested project worktree.",
+        }),
+      ),
   )
   .add(
     HttpApiEndpoint.patch("project.update", `${root}/:projectID`, {

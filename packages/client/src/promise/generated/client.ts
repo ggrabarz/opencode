@@ -162,6 +162,8 @@ import type {
   CredentialRemoveOutput,
   ProjectListInput,
   ProjectListOutput,
+  ProjectIconsInput,
+  ProjectIconsOutput,
   ProjectUpdateInput,
   ProjectUpdateOutput,
   FormListInput,
@@ -1502,6 +1504,18 @@ export function make(options: ClientOptions) {
             method: "GET",
             path: `/api/project`,
             query: { archived: input?.["archived"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      icons: (input?: ProjectIconsInput, requestOptions?: RequestOptions) =>
+        request<ProjectIconsOutput>(
+          {
+            method: "GET",
+            path: `/api/project/icons`,
+            query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [400, 401, 404],
             empty: false,

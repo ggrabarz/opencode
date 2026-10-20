@@ -124,6 +124,39 @@ export const SettingsProjectGeneral: Component<{
             />
           </SettingsRow>
 
+          <Show when={model.icons.data?.length}>
+            <SettingsRow
+              title={language.t("project.settings.icon.detected.title")}
+              description={language.t("project.settings.icon.detected.description")}
+            >
+              <div class="project-settings-colors" data-action="settings-project-icon-candidates">
+                <For each={model.icons.data}>
+                  {(candidate) => {
+                    const selected = () => model.store.iconOverride === candidate.url
+
+                    return (
+                      <button
+                        type="button"
+                        title={candidate.path}
+                        aria-label={language.t("dialog.project.edit.icon.select", { path: candidate.path })}
+                        aria-pressed={selected()}
+                        class="project-settings-color"
+                        classList={{ "project-settings-color--selected": selected() }}
+                        onClick={() => model.selectIcon(candidate.url)}
+                      >
+                        <ProjectAvatar
+                          fallback=""
+                          src={candidate.url}
+                          class="!size-5 [&_[data-slot=project-avatar-surface]]:!rounded-[6px]"
+                        />
+                      </button>
+                    )
+                  }}
+                </For>
+              </div>
+            </SettingsRow>
+          </Show>
+
           <Show when={!model.store.iconOverride}>
             <SettingsRow
               title={language.t("dialog.project.edit.color")}

@@ -53,12 +53,20 @@ export function upsertProject(
     readonly canonical: AbsolutePath
     readonly vcs?: ProjectSchema.Vcs
     readonly name?: string
+    readonly icon_url?: string
   },
 ) {
   const vcs = project.vcs?.type
   return db
     .insert(ProjectTable)
-    .values({ id: project.id, worktree: project.canonical, vcs, name: project.name, sandboxes: [] })
+    .values({
+      id: project.id,
+      worktree: project.canonical,
+      vcs,
+      name: project.name,
+      icon_url: project.icon_url,
+      sandboxes: [],
+    })
     .onConflictDoUpdate({
       target: ProjectTable.id,
       set: { vcs: vcs ?? null },

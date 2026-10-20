@@ -210,6 +210,7 @@ export function normalize(input: unknown): Result {
     share: Info.fields.share,
     enterprise: Info.fields.enterprise,
     username: Info.fields.username,
+    icon: Info.fields.icon,
     snapshots: Info.fields.snapshots,
     media: Info.fields.media,
     tool_output: Info.fields.tool_output,

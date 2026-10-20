@@ -2192,6 +2192,7 @@ export type ConfigEntry =
         share?: "manual" | "auto" | "disabled"
         enterprise?: { url?: string }
         username?: string
+        icon?: string
         permissions?: PermissionRuleset
         policies?: Array<{
           action: "provider.use" | "tool.use" | "integration.use"

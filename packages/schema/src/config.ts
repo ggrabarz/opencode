@@ -52,6 +52,10 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   username: Schema.String.pipe(optional).annotate({
     description: "Username displayed in conversations and used for telemetry identity",
   }),
+  icon: Schema.String.pipe(optional).annotate({
+    description:
+      "Project icon shown by clients: an image path relative to this config file, or an https or data URL. Only read from the project root config.",
+  }),
   permissions: Permission.Ruleset.pipe(optional).annotate({
     description: "Ordered tool permission rules applied to agent tool use",
   }),

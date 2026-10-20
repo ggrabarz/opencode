@@ -13,6 +13,7 @@ import { Git } from "./git.js"
 import { AppProcess } from "@opencode/util/process"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Hash } from "@opencode/util/hash"
+import { ProjectIcon } from "./project/icon.js"
 import { ProjectSchema } from "./project/schema.js"
 import { ProjectTable, upsertProject } from "./project/sql.js"
 import { WorktreeTable } from "./worktree/sql.js"
@@ -103,7 +104,7 @@ export interface Interface {
   readonly activate: (projectID: ID) => Effect.Effect<void>
   /** Resolves and persists the owning Project. */
   readonly resolve: (input: AbsolutePath) => Effect.Effect<Resolved>
-  /** Archives Projects whose known directories are all gone; resolving a Project unarchives it. */
+  /** Archives Projects whose known directories are all gone and refreshes discovered icons; resolving a Project unarchives it. */
   readonly sweep: () => Effect.Effect<void>
 }
 
@@ -144,15 +145,26 @@ const layer = Layer.effect(
     const bus = yield* Bus.Service
     const db = (yield* Database.Service).db
 
+    const discoverIcon = Effect.fnUntraced(function* (roots: Iterable<AbsolutePath>) {
+      for (const root of new Set(roots)) {
+        const found = (yield* ProjectIcon.discover(fs, root, { limit: 1 }))[0]
+        if (found) return found
+      }
+    })
+
     const announcing = new Set<string>()
     const persist = Effect.fnUntraced(function* (project: Resolved) {
       const previous = yield* db
-        .select({ canonical: ProjectTable.worktree, name: ProjectTable.name })
+        .select({ canonical: ProjectTable.worktree, name: ProjectTable.name, icon_url: ProjectTable.icon_url })
         .from(ProjectTable)
         .where(eq(ProjectTable.id, project.id))
         .get()
         .pipe(Effect.orDie)
-      yield* upsertProject(db, project).pipe(Effect.orDie)
+      const icon_url =
+        project.id === ID.global || previous?.icon_url
+          ? undefined
+          : (yield* discoverIcon([project.canonical, project.directory]))?.url
+      yield* upsertProject(db, { ...project, icon_url }).pipe(Effect.orDie)
       const unarchived = yield* db
         .update(ProjectTable)
         .set({ time_archived: null, time_updated: sql`${ProjectTable.time_updated}` })
@@ -160,12 +172,16 @@ const layer = Layer.effect(
         .returning()
         .get()
         .pipe(Effect.orDie)
-      const named =
-        previous && !previous.name && project.name
+      const backfilled =
+        previous && ((!previous.name && project.name) || (!previous.icon_url && icon_url))
           ? yield* db
               .update(ProjectTable)
-              .set({ name: project.name, time_updated: sql`${ProjectTable.time_updated}` })
-              .where(and(eq(ProjectTable.id, project.id), isNull(ProjectTable.name)))
+              .set({
+                name: !previous.name && project.name ? project.name : sql`${ProjectTable.name}`,
+                icon_url: !previous.icon_url && icon_url ? icon_url : sql`${ProjectTable.icon_url}`,
+                time_updated: sql`${ProjectTable.time_updated}`,
+              })
+              .where(eq(ProjectTable.id, project.id))
               .returning()
               .get()
               .pipe(Effect.orDie)
@@ -183,7 +199,7 @@ const layer = Layer.effect(
               .get()
               .pipe(Effect.orDie)
           : undefined
-      const changed = replaced ?? named ?? unarchived
+      const changed = replaced ?? backfilled ?? unarchived
       if (changed) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(changed))
       if (!project.vcs) return project
       const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: string }> = [
@@ -456,6 +472,49 @@ const layer = Layer.effect(
           if (row) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(row))
         }),
         { concurrency: 8, discard: true },
+      )
+      const active = yield* db
+        .select({
+          id: ProjectTable.id,
+          canonical: ProjectTable.worktree,
+          vcs: ProjectTable.vcs,
+          name: ProjectTable.name,
+          icon_url: ProjectTable.icon_url,
+        })
+        .from(ProjectTable)
+        .where(and(isNull(ProjectTable.time_archived), ne(ProjectTable.id, ID.global)))
+        .all()
+        .pipe(Effect.orDie)
+      yield* Effect.forEach(
+        active,
+        Effect.fnUntraced(function* (project) {
+          const roots = [
+            project.canonical,
+            ...worktrees.filter((item) => item.project_id === project.id).map((item) => item.directory),
+          ]
+          const icon = (yield* discoverIcon(roots))?.url ?? null
+          const origin =
+            project.vcs === "git" && !project.name
+              ? yield* git.repo
+                  .discover(project.canonical)
+                  .pipe(Effect.andThen((repo) => (repo ? git.remote.get(repo) : Effect.succeed(undefined))))
+              : undefined
+          const name = (origin ? repositoryName(origin) : undefined) ?? project.name
+          if (icon === project.icon_url && name === project.name) return
+          const updated = yield* db
+            .update(ProjectTable)
+            .set({
+              icon_url: icon,
+              name: sql`coalesce(${ProjectTable.name}, ${name})`,
+              time_updated: sql`${ProjectTable.time_updated}`,
+            })
+            .where(eq(ProjectTable.id, project.id))
+            .returning()
+            .get()
+            .pipe(Effect.orDie)
+          if (updated) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(updated))
+        }),
+        { concurrency: 4, discard: true },
       )
     })
 
